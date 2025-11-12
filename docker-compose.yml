@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  order-processing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: order-processing
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist order data outside container
+      - ./data/orders:/app/data/orders
+    environment:
+      - SPRING_PROFILES_ACTIVE=default
+      - ORDER_REPOSITORY_DATA_DIR=/app/data/orders
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - order-network
+
+networks:
+  order-network:
+    driver: bridge
+
