@@ -33,8 +33,7 @@ public class OrderController {
 
     @Operation(
             summary = "Create a new order",
-            description = "Creates a new order with the provided customer ID and items. The order will be created with PENDING status. " +
-                    "Supports idempotency via 'Idempotency-Key' header - if provided, duplicate requests with the same key will return the existing order."
+            description = "Create a new order. Starts with PENDING status. Use Idempotency-Key header to prevent duplicates on retry."
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "201", description = "Order created successfully",
@@ -45,9 +44,13 @@ public class OrderController {
     })
     @PostMapping
     public ResponseEntity<Order> create(
-            @Parameter(description = "Idempotency key (optional) - ensures request is processed only once", 
-                       example = "550e8400-e29b-41d4-a716-446655440000")
+            @Parameter(
+                    name = "Idempotency-Key",
+                    description = "Optional header to prevent duplicate orders on retry",
+                    example = "550e8400-e29b-41d4-a716-446655440000",
+                    schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Parameter(description = "Order details")
             @Validated @RequestBody CreateOrderRequest req) {
         // Check if order already exists with this idempotency key
         boolean orderExists = idempotencyKey != null && 
@@ -60,7 +63,7 @@ public class OrderController {
 
     @Operation(
             summary = "Get order by ID",
-            description = "Retrieves a single order by its unique identifier"
+            description = "Get order details by ID"
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Order found",
@@ -69,7 +72,12 @@ public class OrderController {
     })
     @GetMapping("/{id}")
     public ResponseEntity<Order> get(
-            @Parameter(description = "Order ID", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
+            @Parameter(
+                    name = "id",
+                    description = "Order ID",
+                    required = true,
+                    example = "123e4567-e89b-12d3-a456-426614174000",
+                    schema = @Schema(type = "string", format = "uuid"))
             @PathVariable String id) {
         // Basic UUID format validation
         if (id == null || id.isBlank() || id.length() > 100) {
@@ -80,8 +88,7 @@ public class OrderController {
 
     @Operation(
             summary = "List orders with pagination",
-            description = "Retrieves a paginated list of orders. Optionally filter by status. " +
-                    "Returns orders with pagination metadata."
+            description = "Get paginated list of orders. Optionally filter by status."
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Orders retrieved successfully",
@@ -89,11 +96,23 @@ public class OrderController {
     })
     @GetMapping
     public PageResponse<Order> list(
-            @Parameter(description = "Filter by order status", example = "PENDING")
+            @Parameter(
+                    name = "status",
+                    description = "Filter by status (optional)",
+                    example = "PENDING",
+                    schema = @Schema(allowableValues = {"PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"}))
             @RequestParam(required = false) OrderStatus status,
-            @Parameter(description = "Page number (0-indexed)", example = "0")
+            @Parameter(
+                    name = "page",
+                    description = "Page number (starts at 0)",
+                    example = "0",
+                    schema = @Schema(type = "integer", minimum = "0", defaultValue = "0"))
             @RequestParam(defaultValue = "0") int page,
-            @Parameter(description = "Page size (max 1000)", example = "20")
+            @Parameter(
+                    name = "size",
+                    description = "Items per page (max 1000)",
+                    example = "20",
+                    schema = @Schema(type = "integer", minimum = "1", maximum = "1000", defaultValue = "20"))
             @RequestParam(defaultValue = "20") int size) {
         if (page < 0) {
             throw new IllegalArgumentException("Page must be non-negative");
@@ -108,8 +127,7 @@ public class OrderController {
 
     @Operation(
             summary = "Update order status",
-            description = "Updates the status of an order. Valid transitions are enforced by the state machine. " +
-                    "Requires the current version number to prevent concurrent modification conflicts."
+            description = "Change order status. Requires current version number."
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Status updated successfully",
@@ -119,8 +137,14 @@ public class OrderController {
     })
     @PutMapping("/{id}/status")
     public ResponseEntity<Order> updateStatus(
-            @Parameter(description = "Order ID", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
+            @Parameter(
+                    name = "id",
+                    description = "Order ID",
+                    required = true,
+                    example = "123e4567-e89b-12d3-a456-426614174000",
+                    schema = @Schema(type = "string", format = "uuid"))
             @PathVariable String id,
+            @Parameter(description = "Status and version")
             @Validated @RequestBody UpdateStatusRequest req) {
         Order updated = service.updateStatus(id, req.getStatus(), req.getVersion());
         return ResponseEntity.ok(updated);
@@ -128,8 +152,7 @@ public class OrderController {
 
     @Operation(
             summary = "Cancel an order",
-            description = "Cancels an order. Only orders with PENDING status can be cancelled. " +
-                    "Requires the current version number to prevent concurrent modification conflicts."
+            description = "Cancel an order. Only PENDING orders can be cancelled. Requires version number."
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Order cancelled successfully",
@@ -139,9 +162,19 @@ public class OrderController {
     })
     @DeleteMapping("/{id}")
     public ResponseEntity<Order> cancel(
-            @Parameter(description = "Order ID", required = true, example = "123e4567-e89b-12d3-a456-426614174000")
+            @Parameter(
+                    name = "id",
+                    description = "Order ID",
+                    required = true,
+                    example = "123e4567-e89b-12d3-a456-426614174000",
+                    schema = @Schema(type = "string", format = "uuid"))
             @PathVariable String id,
-            @Parameter(description = "Current version number for optimistic locking", required = true, example = "1")
+            @Parameter(
+                    name = "version",
+                    description = "Order version (get from order details)",
+                    required = true,
+                    example = "1",
+                    schema = @Schema(type = "integer", minimum = "0"))
             @RequestParam long version) {
         Order cancelled = service.cancelOrder(id, version);
         return ResponseEntity.ok(cancelled);

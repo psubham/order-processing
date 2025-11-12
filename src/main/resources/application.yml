@@ -4,16 +4,41 @@ server:
   max-http-header-size: 16KB
   # Timeout configuration
   connection-timeout: 20000
+  # Compression for better performance
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/xml,text/plain
+    min-response-size: 1024
+  # Thread pool optimization
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    max-connections: 10000
+    accept-count: 100
+    connection-timeout: 20000
 
 spring:
   jackson:
     serialization:
       WRITE_DATES_AS_TIMESTAMPS: false
+      WRITE_DURATIONS_AS_TIMESTAMPS: false
+    deserialization:
+      FAIL_ON_UNKNOWN_PROPERTIES: false
+    default-property-inclusion: non_null
   # Request body size limit
   servlet:
     multipart:
       max-file-size: 10MB
       max-request-size: 10MB
+  # Async configuration for better performance
+  task:
+    execution:
+      pool:
+        core-size: 8
+        max-size: 16
+        queue-capacity: 100
+      thread-name-prefix: async-task-
 
 order:
   repository:
@@ -29,6 +54,9 @@ springdoc:
     enabled: true
     operations-sorter: method
     tags-sorter: alpha
+    try-it-out-enabled: true
+    filter: true
+  show-actuator: false
 
 management:
   endpoints:

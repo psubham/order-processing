@@ -20,13 +20,25 @@ public class FileOrderRepository implements OrderRepository {
     
     private final Path baseDir;
     private final Path idempotencyIndexFile;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
     private final Map<String, ReentrantReadWriteLock> locks = new ConcurrentHashMap<>();
     private final Map<String, String> idempotencyIndex = new ConcurrentHashMap<>(); // In-memory cache
+    
+    // Cache for orders to avoid repeated file reads (with size limit)
+    private static final int MAX_CACHE_SIZE = 1000;
+    private final Map<String, Order> orderCache = new ConcurrentHashMap<>();
 
     public FileOrderRepository(Path baseDir) {
         this.baseDir = baseDir;
         this.idempotencyIndexFile = baseDir.resolve("_idempotency_index.json");
+        // Configure ObjectMapper for better performance
+        this.mapper = new ObjectMapper();
+        // Register Java 8 time module for Instant, LocalDateTime, etc.
+        this.mapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        this.mapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        this.mapper.configure(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        this.mapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, false);
+        this.mapper.configure(com.fasterxml.jackson.core.JsonGenerator.Feature.AUTO_CLOSE_TARGET, false);
         try {
             Files.createDirectories(baseDir);
             loadIdempotencyIndex();
@@ -103,6 +115,10 @@ public class FileOrderRepository implements OrderRepository {
                 mapper.writeValue(os, order);
             }
             Files.move(tmp, p, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            
+            // Update cache
+            updateCache(id, order);
+            
             return order;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -110,15 +126,40 @@ public class FileOrderRepository implements OrderRepository {
             l.writeLock().unlock();
         }
     }
+    
+    private void updateCache(String id, Order order) {
+        // Limit cache size to prevent memory issues
+        if (orderCache.size() >= MAX_CACHE_SIZE) {
+            // Remove oldest entries (simple strategy: clear half)
+            final int toRemove = MAX_CACHE_SIZE / 2;
+            final int[] removed = {0};
+            orderCache.entrySet().removeIf(entry -> {
+                if (removed[0] < toRemove) {
+                    removed[0]++;
+                    return true;
+                }
+                return false;
+            });
+        }
+        orderCache.put(id, order);
+    }
 
     @Override
     public Optional<Order> findById(String id) {
+        // Check cache first
+        Order cached = orderCache.get(id);
+        if (cached != null) {
+            return Optional.of(cached);
+        }
+        
         Path p = pathFor(id);
         if (!Files.exists(p)) return Optional.empty();
         ReentrantReadWriteLock l = lockFor(id);
         l.readLock().lock();
         try (InputStream is = Files.newInputStream(p)) {
             Order o = mapper.readValue(is, Order.class);
+            // Update cache
+            updateCache(id, o);
             return Optional.of(o);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -212,7 +253,8 @@ public class FileOrderRepository implements OrderRepository {
             if (Files.deleteIfExists(p)) {
                 log.debug("Deleted order file: {}", id);
             }
-            // Clean up lock after deletion
+            // Clean up cache and lock after deletion
+            orderCache.remove(id);
             locks.remove(id);
         } catch (IOException e) {
             log.error("Error deleting order file {}: {}", id, e.getMessage(), e);
