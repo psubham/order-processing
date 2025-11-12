@@ -22,11 +22,11 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(@NonNull CorsRegistry registry) {
-        // CORS for API endpoints
-        registry.addMapping("/api/**")
-                .allowedOrigins("*") // In production, specify actual origins
+        registry.addMapping("/**")
+                .allowedOriginPatterns("*") // TODO: With actual prod env change it
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
+                .allowCredentials(true)
                 .maxAge(3600);
         
         // CORS for Swagger/OpenAPI endpoints
